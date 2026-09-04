@@ -30,6 +30,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.brianchen.locklist.LockListApp
 import com.brianchen.locklist.service.ScreenService
 import com.brianchen.locklist.ui.theme.LockListTheme
 
@@ -55,19 +58,33 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val repo = (application as LockListApp).tasks
         setContent {
             LockListTheme {
+                val tasks by repo.observeTasks().collectAsState(initial = emptyList())
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    SetupScreen(
-                        overlayOk = overlayOk,
-                        batteryOk = batteryOk,
-                        notifyOk = notifyOk,
-                        onOverlay = { openOverlaySettings() },
-                        onBattery = { openBatterySettings() },
-                        onNotify = { openNotificationSettings() },
-                        onStart = { onStartServiceClicked() },
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .padding(innerPadding)
+                            .padding(24.dp)
+                            .fillMaxSize()
+                    ) {
+                        SetupScreen(
+                            overlayOk = overlayOk,
+                            batteryOk = batteryOk,
+                            notifyOk = notifyOk,
+                            onOverlay = { openOverlaySettings() },
+                            onBattery = { openBatterySettings() },
+                            onNotify = { openNotificationSettings() },
+                            onStart = { onStartServiceClicked() }
+                        )
+                        Spacer(Modifier.height(24.dp))
+                        EditorScreen(
+                            repo = repo,
+                            tasks = tasks,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }
@@ -139,15 +156,9 @@ private fun SetupScreen(
     onOverlay: () -> Unit,
     onBattery: () -> Unit,
     onNotify: () -> Unit,
-    onStart: () -> Unit,
-    modifier: Modifier = Modifier
+    onStart: () -> Unit
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("LockList setup", style = MaterialTheme.typography.headlineSmall)
         PermissionRow("Display over other apps", overlayOk.value, onOverlay)
         PermissionRow("Battery unrestricted", batteryOk.value, onBattery)
