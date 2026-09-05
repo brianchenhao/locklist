@@ -26,7 +26,8 @@ class TaskRepository(
                 sortOrder = nextOrder,
                 createdAt = now,
                 updatedAt = now,
-                deleted = false
+                deleted = false,
+                recurring = false
             )
         )
         onChanged()
@@ -63,10 +64,22 @@ class TaskRepository(
         onChanged()
     }
 
+    suspend fun setRecurring(task: Task, recurring: Boolean) {
+        dao.upsert(task.copy(recurring = recurring))
+    }
+
+    suspend fun resetRecurringDone() {
+        val now = System.currentTimeMillis()
+        val due = dao.getRecurringDone()
+        if (due.isEmpty()) return
+        due.forEach { dao.upsert(it.copy(done = false, updatedAt = now)) }
+        onChanged()
+    }
+
     suspend fun applyRemote(remote: Task) {
         val local = dao.getById(remote.id)
         if (local != null && local.updatedAt > remote.updatedAt) return
-        dao.upsert(remote)
+        dao.upsert(remote.copy(recurring = local?.recurring ?: remote.recurring))
     }
 
     private suspend fun swapOrder(a: Task, b: Task) {

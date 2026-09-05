@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,9 +46,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.brianchen.locklist.LockListApp
+import com.brianchen.locklist.data.AppSettings
 import com.brianchen.locklist.service.ScreenService
 import com.brianchen.locklist.sync.SyncWorker
 import com.brianchen.locklist.ui.theme.LockListTheme
+import java.io.FileOutputStream
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -62,12 +65,25 @@ class MainActivity : ComponentActivity() {
         startScreenService()
     }
 
+    private val wallpaperPicker = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        val app = application as LockListApp
+        val dest = app.settings.wallpaperFile()
+        contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(dest).use { output -> input.copyTo(output) }
+        }
+        app.settings.markWallpaperChanged()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val app = application as LockListApp
         setContent {
-            LockListTheme {
+            val themeMode by app.settings.themeMode
+            LockListTheme(themeMode = themeMode) {
                 var signedIn by remember { mutableStateOf(false) }
                 var email by remember { mutableStateOf<String?>(null) }
                 val tasks by app.tasks.observeTasks().collectAsState(initial = emptyList())
@@ -91,6 +107,16 @@ class MainActivity : ComponentActivity() {
                             onBattery = { openBatterySettings() },
                             onNotify = { openNotificationSettings() },
                             onStart = { onStartServiceClicked() }
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        AppearanceSection(
+                            themeMode = themeMode,
+                            onTheme = { app.settings.setThemeMode(it) },
+                            onPickWallpaper = { wallpaperPicker.launch("image/*") },
+                            onClearWallpaper = {
+                                app.settings.wallpaperFile().delete()
+                                app.settings.markWallpaperChanged()
+                            }
                         )
                         Spacer(Modifier.height(16.dp))
                         if (!signedIn) {
@@ -228,6 +254,39 @@ private fun PermissionRow(label: String, granted: Boolean, onClick: () -> Unit) 
         )
         Button(onClick = onClick, modifier = Modifier.weight(1f)) {
             Text(label)
+        }
+    }
+}
+
+@Composable
+private fun AppearanceSection(
+    themeMode: String,
+    onTheme: (String) -> Unit,
+    onPickWallpaper: () -> Unit,
+    onClearWallpaper: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Appearance", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = themeMode == AppSettings.THEME_SYSTEM,
+                onClick = { onTheme(AppSettings.THEME_SYSTEM) },
+                label = { Text("System") }
+            )
+            FilterChip(
+                selected = themeMode == AppSettings.THEME_DARK,
+                onClick = { onTheme(AppSettings.THEME_DARK) },
+                label = { Text("Dark") }
+            )
+            FilterChip(
+                selected = themeMode == AppSettings.THEME_LIGHT,
+                onClick = { onTheme(AppSettings.THEME_LIGHT) },
+                label = { Text("Light") }
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onPickWallpaper) { Text("Set wallpaper") }
+            TextButton(onClick = onClearWallpaper) { Text("Clear") }
         }
     }
 }

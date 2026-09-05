@@ -9,6 +9,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import com.brianchen.locklist.data.AppSettings
 
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
@@ -24,10 +25,15 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun LockListTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: String = AppSettings.THEME_SYSTEM,
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    val darkTheme = when (themeMode) {
+        AppSettings.THEME_DARK -> true
+        AppSettings.THEME_LIGHT -> false
+        else -> isSystemInDarkTheme()
+    }
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current

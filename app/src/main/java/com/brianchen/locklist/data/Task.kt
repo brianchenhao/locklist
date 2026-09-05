@@ -11,5 +11,6 @@ data class Task(
     val sortOrder: Int,
     val createdAt: Long,
     val updatedAt: Long,
-    val deleted: Boolean = false
+    val deleted: Boolean = false,
+    val recurring: Boolean = false
 )

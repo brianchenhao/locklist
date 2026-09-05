@@ -107,6 +107,9 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
                             renaming = task
                             renameTitle = task.title
                         },
+                        onToggleRecurring = {
+                            scope.launch { repo.setRecurring(task, !task.recurring) }
+                        },
                         onMoveUp = { scope.launch { repo.moveUp(task) } },
                         onMoveDown = { scope.launch { repo.moveDown(task) } },
                         onDelete = { scope.launch { repo.delete(task) } }
@@ -152,6 +155,7 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
 private fun TaskEditorRow(
     task: Task,
     onRename: () -> Unit,
+    onToggleRecurring: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onDelete: () -> Unit
@@ -171,6 +175,9 @@ private fun TaskEditorRow(
                 .padding(end = 8.dp),
             style = MaterialTheme.typography.titleMedium
         )
+        TextButton(onClick = onToggleRecurring) {
+            Text(if (task.recurring) "Daily on" else "Daily")
+        }
         TextButton(onClick = onMoveUp) { Text("Up") }
         TextButton(onClick = onMoveDown) { Text("Down") }
         TextButton(onClick = onDelete) { Text("Delete") }

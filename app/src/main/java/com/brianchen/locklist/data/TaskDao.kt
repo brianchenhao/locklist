@@ -24,6 +24,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id")
     suspend fun getById(id: String): Task?
 
+    @Query("SELECT * FROM tasks WHERE deleted = 0 AND recurring = 1 AND done = 1")
+    suspend fun getRecurringDone(): List<Task>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(task: Task)
 

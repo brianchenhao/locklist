@@ -4,7 +4,9 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.brianchen.locklist.data.AppDatabase
+import com.brianchen.locklist.data.AppSettings
 import com.brianchen.locklist.data.TaskRepository
+import com.brianchen.locklist.sync.ResetWorker
 import com.brianchen.locklist.sync.SyncWorker
 import com.brianchen.locklist.sync.TaskSync
 import io.github.jan.supabase.SupabaseClient
@@ -19,9 +21,12 @@ class LockListApp : Application() {
         private set
     lateinit var supabase: SupabaseClient
         private set
+    lateinit var settings: AppSettings
+        private set
 
     override fun onCreate() {
         super.onCreate()
+        settings = AppSettings(this)
         supabase = createSupabaseClient(
             supabaseUrl = BuildConfig.SUPABASE_URL,
             supabaseKey = BuildConfig.SUPABASE_ANON_KEY
@@ -41,6 +46,7 @@ class LockListApp : Application() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         SyncWorker.schedulePeriodic(this)
         SyncWorker.enqueueOneShot(this)
+        ResetWorker.scheduleNext(this)
     }
 
     companion object {
