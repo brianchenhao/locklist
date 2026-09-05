@@ -28,11 +28,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,7 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.brianchen.locklist.LockListApp
 import com.brianchen.locklist.service.ScreenService
+import com.brianchen.locklist.sync.SyncWorker
 import com.brianchen.locklist.ui.theme.LockListTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val overlayOk = mutableStateOf(false)
@@ -58,10 +65,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val repo = (application as LockListApp).tasks
+        val app = application as LockListApp
         setContent {
             LockListTheme {
-                val tasks by repo.observeTasks().collectAsState(initial = emptyList())
+                var signedIn by remember { mutableStateOf(false) }
+                var email by remember { mutableStateOf<String?>(null) }
+                val tasks by app.tasks.observeTasks().collectAsState(initial = emptyList())
+                val scope = rememberCoroutineScope()
+                LaunchedEffect(Unit) {
+                    signedIn = app.sync.isSignedIn()
+                    email = app.sync.currentEmail()
+                }
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Column(
                         modifier = Modifier
@@ -78,12 +92,41 @@ class MainActivity : ComponentActivity() {
                             onNotify = { openNotificationSettings() },
                             onStart = { onStartServiceClicked() }
                         )
-                        Spacer(Modifier.height(24.dp))
-                        EditorScreen(
-                            repo = repo,
-                            tasks = tasks,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Spacer(Modifier.height(16.dp))
+                        if (!signedIn) {
+                            LoginScreen(
+                                sync = app.sync,
+                                onSignedIn = {
+                                    signedIn = true
+                                    scope.launch {
+                                        email = app.sync.currentEmail()
+                                        SyncWorker.enqueueOneShot(this@MainActivity)
+                                    }
+                                }
+                            )
+                        } else {
+                            Text(
+                                "Signed in as ${email ?: "portal admin"}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        app.sync.signOut()
+                                        signedIn = false
+                                        email = null
+                                    }
+                                }
+                            ) {
+                                Text("Sign out")
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            EditorScreen(
+                                repo = app.tasks,
+                                tasks = tasks,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }

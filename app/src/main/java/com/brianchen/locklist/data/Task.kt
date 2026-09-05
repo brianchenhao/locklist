@@ -10,5 +10,6 @@ data class Task(
     val done: Boolean,
     val sortOrder: Int,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val deleted: Boolean = false
 )

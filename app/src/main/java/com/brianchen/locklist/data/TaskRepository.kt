@@ -3,12 +3,21 @@ package com.brianchen.locklist.data
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 
-class TaskRepository(private val dao: TaskDao) {
-    fun observeTasks(): Flow<List<Task>> = dao.observeAll()
+class TaskRepository(
+    private val dao: TaskDao,
+    private val onChanged: () -> Unit = {}
+) {
+    fun observeTasks(): Flow<List<Task>> = dao.observeVisible()
+
+    suspend fun getChangedSince(since: Long): List<Task> = dao.getChangedSince(since)
+
+    suspend fun getAll(): List<Task> = dao.getAll()
+
+    suspend fun getById(id: String): Task? = dao.getById(id)
 
     suspend fun add(title: String) {
         val now = System.currentTimeMillis()
-        val nextOrder = (dao.getAll().maxOfOrNull { it.sortOrder } ?: -1) + 1
+        val nextOrder = (dao.getVisible().maxOfOrNull { it.sortOrder } ?: -1) + 1
         dao.upsert(
             Task(
                 id = UUID.randomUUID().toString(),
@@ -16,35 +25,48 @@ class TaskRepository(private val dao: TaskDao) {
                 done = false,
                 sortOrder = nextOrder,
                 createdAt = now,
-                updatedAt = now
+                updatedAt = now,
+                deleted = false
             )
         )
+        onChanged()
     }
 
     suspend fun rename(task: Task, title: String) {
         dao.upsert(task.copy(title = title.trim(), updatedAt = System.currentTimeMillis()))
+        onChanged()
     }
 
     suspend fun setDone(task: Task, done: Boolean) {
         dao.upsert(task.copy(done = done, updatedAt = System.currentTimeMillis()))
+        onChanged()
     }
 
     suspend fun delete(task: Task) {
-        dao.delete(task)
+        dao.upsert(task.copy(deleted = true, updatedAt = System.currentTimeMillis()))
+        onChanged()
     }
 
     suspend fun moveUp(task: Task) {
-        val all = dao.getAll()
-        val index = all.indexOfFirst { it.id == task.id }
+        val visible = dao.getVisible()
+        val index = visible.indexOfFirst { it.id == task.id }
         if (index <= 0) return
-        swapOrder(all[index], all[index - 1])
+        swapOrder(visible[index], visible[index - 1])
+        onChanged()
     }
 
     suspend fun moveDown(task: Task) {
-        val all = dao.getAll()
-        val index = all.indexOfFirst { it.id == task.id }
-        if (index < 0 || index >= all.lastIndex) return
-        swapOrder(all[index], all[index + 1])
+        val visible = dao.getVisible()
+        val index = visible.indexOfFirst { it.id == task.id }
+        if (index < 0 || index >= visible.lastIndex) return
+        swapOrder(visible[index], visible[index + 1])
+        onChanged()
+    }
+
+    suspend fun applyRemote(remote: Task) {
+        val local = dao.getById(remote.id)
+        if (local != null && local.updatedAt > remote.updatedAt) return
+        dao.upsert(remote)
     }
 
     private suspend fun swapOrder(a: Task, b: Task) {
