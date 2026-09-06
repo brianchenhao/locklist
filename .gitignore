@@ -17,6 +17,7 @@ local.properties
 *.apk
 *.aab
 output-metadata.json
+/latest.json
 *.jks
 *.keystore
 .kotlin/
