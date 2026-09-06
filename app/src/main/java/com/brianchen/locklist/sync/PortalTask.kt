@@ -1,6 +1,7 @@
 package com.brianchen.locklist.sync
 
 import com.brianchen.locklist.data.Task
+import com.brianchen.locklist.data.TaskStatus
 import java.time.Instant
 import java.time.OffsetDateTime
 import kotlinx.serialization.SerialName
@@ -17,21 +18,27 @@ data class PortalTask(
     val id: String,
     @SerialName("person_id") val personId: String,
     val title: String,
+    val notes: String? = null,
     val status: String,
     val sort: Int,
+    val images: List<String>? = null,
     @SerialName("completed_at") val completedAt: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String
 ) {
     fun toLocal(): Task {
+        val stored = TaskStatus.normalize(status)
         return Task(
             id = id,
             title = title,
-            done = status == "done",
+            done = stored == TaskStatus.DONE,
             sortOrder = sort,
             createdAt = parseIso(createdAt),
             updatedAt = parseIso(updatedAt),
-            deleted = false
+            deleted = false,
+            status = stored,
+            notes = notes.orEmpty(),
+            imagePaths = TaskStatus.imagePaths(images.orEmpty())
         )
     }
 }
@@ -41,6 +48,7 @@ data class PortalTaskInsert(
     val id: String,
     @SerialName("person_id") val personId: String,
     val title: String,
+    val notes: String? = null,
     val status: String,
     val sort: Int,
     val images: List<String> = emptyList(),
@@ -53,6 +61,7 @@ data class PortalTaskInsert(
 @Serializable
 data class PortalTaskPatch(
     val title: String,
+    val notes: String? = null,
     val status: String,
     val sort: Int,
     @SerialName("completed_at") val completedAt: String?,
@@ -60,7 +69,7 @@ data class PortalTaskPatch(
     @SerialName("updated_by") val updatedBy: String? = null
 )
 
-fun Task.toStatus(): String = if (done) "done" else "more"
+fun Task.toStatus(): String = TaskStatus.normalize(status)
 
 fun Task.completedAtIso(): String? = if (done) toIso(updatedAt) else null
 

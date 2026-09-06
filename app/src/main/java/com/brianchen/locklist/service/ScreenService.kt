@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.brianchen.locklist.LockListApp
@@ -19,9 +20,13 @@ class ScreenService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != Intent.ACTION_SCREEN_ON) return
             val lock = Intent(context, LockActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
-            context.startActivity(lock)
+            try {
+                context.startActivity(lock)
+            } catch (e: Exception) {
+                Log.e("LockList", "could not open lock checklist", e)
+            }
         }
     }
 

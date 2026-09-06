@@ -1,20 +1,34 @@
 package com.brianchen.locklist.sync
 
 import android.content.Context
+import android.util.Log
 import com.brianchen.locklist.data.TaskRepository
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.RealtimeChannel
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.realtime
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 class TaskSync(
     context: Context,
     private val repo: TaskRepository,
-    private val supabase: SupabaseClient
+    private val supabase: SupabaseClient,
+    private val appScope: CoroutineScope
 ) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val mutex = Mutex()
+    private var realtimeJob: Job? = null
+    private var channel: RealtimeChannel? = null
 
     suspend fun isSignedIn(): Boolean {
         supabase.auth.awaitInitialization()
@@ -26,15 +40,59 @@ class TaskSync(
             this.email = email
             this.password = password
         }
+        startRealtime()
     }
 
     suspend fun signOut() {
+        stopRealtime()
         supabase.auth.signOut()
     }
 
     suspend fun currentEmail(): String? {
         supabase.auth.awaitInitialization()
         return supabase.auth.currentUserOrNull()?.email
+    }
+
+    @OptIn(FlowPreview::class)
+    fun startRealtime() {
+        realtimeJob?.cancel()
+        realtimeJob = appScope.launch {
+            try {
+                if (!isSignedIn()) return@launch
+                supabase.realtime.connect()
+                channel?.unsubscribe()
+                val next = supabase.channel(CHANNEL_ID)
+                channel = next
+                val changes = next.postgresChangeFlow<PostgresAction>(schema = "public") {
+                    table = "portal_tasks"
+                }
+                val collector = launch {
+                    changes.debounce(300).collect {
+                        try {
+                            syncOnce()
+                        } catch (e: Exception) {
+                            Log.w("LockList", "realtime sync failed", e)
+                        }
+                    }
+                }
+                next.subscribe()
+                collector.join()
+            } catch (e: Exception) {
+                Log.w("LockList", "realtime subscribe failed", e)
+            }
+        }
+    }
+
+    fun stopRealtime() {
+        realtimeJob?.cancel()
+        realtimeJob = null
+        appScope.launch {
+            try {
+                channel?.unsubscribe()
+            } catch (_: Exception) {
+            }
+            channel = null
+        }
     }
 
     suspend fun syncOnce() = mutex.withLock {
@@ -67,6 +125,7 @@ class TaskSync(
                         id = local.id,
                         personId = personId,
                         title = local.title,
+                        notes = local.notes.ifBlank { null },
                         status = local.toStatus(),
                         sort = local.sortOrder,
                         completedAt = local.completedAtIso(),
@@ -79,6 +138,7 @@ class TaskSync(
                 supabase.from("portal_tasks").update(
                     PortalTaskPatch(
                         title = local.title,
+                        notes = local.notes.ifBlank { null },
                         status = local.toStatus(),
                         sort = local.sortOrder,
                         completedAt = local.completedAtIso(),
@@ -126,5 +186,6 @@ class TaskSync(
     companion object {
         private const val PREFS = "locklist_sync"
         private const val KEY_LAST_SYNC = "lastSync"
+        private const val CHANNEL_ID = "locklist-portal-tasks"
     }
 }

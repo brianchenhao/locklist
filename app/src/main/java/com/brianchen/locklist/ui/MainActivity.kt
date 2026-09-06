@@ -45,11 +45,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.brianchen.locklist.BuildConfig
 import com.brianchen.locklist.LockListApp
 import com.brianchen.locklist.data.AppSettings
 import com.brianchen.locklist.service.ScreenService
 import com.brianchen.locklist.sync.SyncWorker
 import com.brianchen.locklist.ui.theme.LockListTheme
+import com.brianchen.locklist.update.AppUpdate
+import com.brianchen.locklist.update.UpdateInfo
+import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.launch
 
@@ -77,6 +81,10 @@ class MainActivity : ComponentActivity() {
         app.settings.markWallpaperChanged()
     }
 
+    private val installPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -88,6 +96,10 @@ class MainActivity : ComponentActivity() {
                 var email by remember { mutableStateOf<String?>(null) }
                 val tasks by app.tasks.observeTasks().collectAsState(initial = emptyList())
                 val scope = rememberCoroutineScope()
+                val updater = remember { AppUpdate() }
+                var updateStatus by remember { mutableStateOf("Version ${BuildConfig.VERSION_NAME}") }
+                var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+                var updateBusy by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) {
                     signedIn = app.sync.isSignedIn()
                     email = app.sync.currentEmail()
@@ -106,7 +118,59 @@ class MainActivity : ComponentActivity() {
                             onOverlay = { openOverlaySettings() },
                             onBattery = { openBatterySettings() },
                             onNotify = { openNotificationSettings() },
-                            onStart = { onStartServiceClicked() }
+                            onStart = { onStartServiceClicked() },
+                            updateStatus = updateStatus,
+                            updateBusy = updateBusy,
+                            canInstallUpdate = pendingUpdate != null,
+                            onCheckUpdate = {
+                                if (updateBusy) return@SetupScreen
+                                updateBusy = true
+                                updateStatus = "Checking…"
+                                scope.launch {
+                                    try {
+                                        val latest = updater.checkLatest()
+                                        if (latest.isNewer) {
+                                            pendingUpdate = latest
+                                            updateStatus =
+                                                "Update ${latest.versionName} available"
+                                        } else {
+                                            pendingUpdate = null
+                                            updateStatus =
+                                                "Up to date (${BuildConfig.VERSION_NAME})"
+                                        }
+                                    } catch (e: Exception) {
+                                        pendingUpdate = null
+                                        updateStatus = e.message ?: "Update check failed"
+                                    } finally {
+                                        updateBusy = false
+                                    }
+                                }
+                            },
+                            onInstallUpdate = {
+                                val latest = pendingUpdate ?: return@SetupScreen
+                                if (updateBusy) return@SetupScreen
+                                if (!updater.canInstall(this@MainActivity)) {
+                                    installPermissionLauncher.launch(
+                                        updater.installPermissionIntent(this@MainActivity)
+                                    )
+                                    updateStatus = "Allow LockList to install apps, then tap Install again"
+                                    return@SetupScreen
+                                }
+                                updateBusy = true
+                                updateStatus = "Downloading ${latest.versionName}…"
+                                scope.launch {
+                                    try {
+                                        val apk = File(cacheDir, "updates/locklist.apk")
+                                        updater.downloadApk(latest.apkUrl, apk)
+                                        startActivity(updater.installIntent(this@MainActivity, apk))
+                                        updateStatus = "Install ${latest.versionName} when prompted"
+                                    } catch (e: Exception) {
+                                        updateStatus = e.message ?: "Download failed"
+                                    } finally {
+                                        updateBusy = false
+                                    }
+                                }
+                            }
                         )
                         Spacer(Modifier.height(16.dp))
                         AppearanceSection(
@@ -225,7 +289,12 @@ private fun SetupScreen(
     onOverlay: () -> Unit,
     onBattery: () -> Unit,
     onNotify: () -> Unit,
-    onStart: () -> Unit
+    onStart: () -> Unit,
+    updateStatus: String,
+    updateBusy: Boolean,
+    canInstallUpdate: Boolean,
+    onCheckUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("LockList setup", style = MaterialTheme.typography.headlineSmall)
@@ -235,6 +304,17 @@ private fun SetupScreen(
         Spacer(Modifier.height(8.dp))
         Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) {
             Text("Start service")
+        }
+        Text(updateStatus, style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onCheckUpdate, enabled = !updateBusy) {
+                Text("Check for update")
+            }
+            if (canInstallUpdate) {
+                Button(onClick = onInstallUpdate, enabled = !updateBusy) {
+                    Text("Install")
+                }
+            }
         }
     }
 }

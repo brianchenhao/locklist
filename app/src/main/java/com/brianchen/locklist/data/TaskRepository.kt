@@ -15,19 +15,22 @@ class TaskRepository(
 
     suspend fun getById(id: String): Task? = dao.getById(id)
 
-    suspend fun add(title: String) {
+    suspend fun add(title: String, status: String = TaskStatus.MORE, notes: String = "") {
+        val next = TaskStatus.normalize(status)
         val now = System.currentTimeMillis()
-        val nextOrder = (dao.getVisible().maxOfOrNull { it.sortOrder } ?: -1) + 1
         dao.upsert(
             Task(
                 id = UUID.randomUUID().toString(),
                 title = title.trim(),
-                done = false,
-                sortOrder = nextOrder,
+                done = next == TaskStatus.DONE,
+                sortOrder = nextSort(next),
                 createdAt = now,
                 updatedAt = now,
                 deleted = false,
-                recurring = false
+                recurring = false,
+                status = next,
+                notes = notes.trim(),
+                imagePaths = ""
             )
         )
         onChanged()
@@ -38,8 +41,42 @@ class TaskRepository(
         onChanged()
     }
 
+    suspend fun setNotes(task: Task, notes: String) {
+        dao.upsert(task.copy(notes = notes, updatedAt = System.currentTimeMillis()))
+        onChanged()
+    }
+
+    suspend fun updateDetails(task: Task, title: String, notes: String) {
+        dao.upsert(
+            task.copy(
+                title = title.trim(),
+                notes = notes.trim(),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        onChanged()
+    }
+
     suspend fun setDone(task: Task, done: Boolean) {
-        dao.upsert(task.copy(done = done, updatedAt = System.currentTimeMillis()))
+        setStatus(task, if (done) TaskStatus.DONE else TaskStatus.MORE)
+    }
+
+    suspend fun setStatus(task: Task, status: String) {
+        val next = TaskStatus.normalize(status)
+        val now = System.currentTimeMillis()
+        val sort = if (TaskStatus.normalize(task.status) == next) {
+            task.sortOrder
+        } else {
+            nextSort(next)
+        }
+        dao.upsert(
+            task.copy(
+                status = next,
+                done = next == TaskStatus.DONE,
+                sortOrder = sort,
+                updatedAt = now
+            )
+        )
         onChanged()
     }
 
@@ -49,18 +86,18 @@ class TaskRepository(
     }
 
     suspend fun moveUp(task: Task) {
-        val visible = dao.getVisible()
-        val index = visible.indexOfFirst { it.id == task.id }
+        val siblings = siblings(task.status)
+        val index = siblings.indexOfFirst { it.id == task.id }
         if (index <= 0) return
-        swapOrder(visible[index], visible[index - 1])
+        swapOrder(siblings[index], siblings[index - 1])
         onChanged()
     }
 
     suspend fun moveDown(task: Task) {
-        val visible = dao.getVisible()
-        val index = visible.indexOfFirst { it.id == task.id }
-        if (index < 0 || index >= visible.lastIndex) return
-        swapOrder(visible[index], visible[index + 1])
+        val siblings = siblings(task.status)
+        val index = siblings.indexOfFirst { it.id == task.id }
+        if (index < 0 || index >= siblings.lastIndex) return
+        swapOrder(siblings[index], siblings[index + 1])
         onChanged()
     }
 
@@ -72,7 +109,15 @@ class TaskRepository(
         val now = System.currentTimeMillis()
         val due = dao.getRecurringDone()
         if (due.isEmpty()) return
-        due.forEach { dao.upsert(it.copy(done = false, updatedAt = now)) }
+        due.forEach {
+            dao.upsert(
+                it.copy(
+                    done = false,
+                    status = TaskStatus.MORE,
+                    updatedAt = now
+                )
+            )
+        }
         onChanged()
     }
 
@@ -80,6 +125,19 @@ class TaskRepository(
         val local = dao.getById(remote.id)
         if (local != null && local.updatedAt > remote.updatedAt) return
         dao.upsert(remote.copy(recurring = local?.recurring ?: remote.recurring))
+    }
+
+    private suspend fun nextSort(status: String): Int {
+        val normalized = TaskStatus.normalize(status)
+        val max = dao.getVisible()
+            .filter { TaskStatus.normalize(it.status) == normalized }
+            .maxOfOrNull { it.sortOrder } ?: 0
+        return max + 1
+    }
+
+    private suspend fun siblings(status: String): List<Task> {
+        val normalized = TaskStatus.normalize(status)
+        return dao.getVisible().filter { TaskStatus.normalize(it.status) == normalized }
     }
 
     private suspend fun swapOrder(a: Task, b: Task) {

@@ -9,12 +9,21 @@ import com.brianchen.locklist.data.TaskRepository
 import com.brianchen.locklist.sync.ResetWorker
 import com.brianchen.locklist.sync.SyncWorker
 import com.brianchen.locklist.sync.TaskSync
+import com.brianchen.locklist.sync.ThumbCache
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.storage.Storage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class LockListApp : Application() {
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     lateinit var tasks: TaskRepository
         private set
     lateinit var sync: TaskSync
@@ -22,6 +31,8 @@ class LockListApp : Application() {
     lateinit var supabase: SupabaseClient
         private set
     lateinit var settings: AppSettings
+        private set
+    lateinit var thumbs: ThumbCache
         private set
 
     override fun onCreate() {
@@ -33,11 +44,14 @@ class LockListApp : Application() {
         ) {
             install(Auth)
             install(Postgrest)
+            install(Realtime)
+            install(Storage)
         }
         tasks = TaskRepository(AppDatabase.create(this).taskDao()) {
             SyncWorker.enqueueOneShot(this)
         }
-        sync = TaskSync(this, tasks, supabase)
+        thumbs = ThumbCache(this, supabase)
+        sync = TaskSync(this, tasks, supabase, appScope)
         val channel = NotificationChannel(
             CHANNEL_ID,
             "LockList",
@@ -47,6 +61,9 @@ class LockListApp : Application() {
         SyncWorker.schedulePeriodic(this)
         SyncWorker.enqueueOneShot(this)
         ResetWorker.scheduleNext(this)
+        appScope.launch {
+            if (sync.isSignedIn()) sync.startRealtime()
+        }
     }
 
     companion object {
