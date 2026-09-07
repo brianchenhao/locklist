@@ -17,6 +17,11 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+      - name: Restore signing key
+        # Same key the phone already trusts, so a GitHub APK can replace the installed build.
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
       - name: Write local.properties
         run: |
           {

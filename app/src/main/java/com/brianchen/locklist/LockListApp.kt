@@ -3,6 +3,9 @@ package com.brianchen.locklist
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.util.Log
 import com.brianchen.locklist.data.AppDatabase
 import com.brianchen.locklist.data.AppSettings
 import com.brianchen.locklist.data.TaskRepository
@@ -16,6 +19,7 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,7 +48,13 @@ class LockListApp : Application() {
         ) {
             install(Auth)
             install(Postgrest)
-            install(Realtime)
+            install(Realtime) {
+                // TaskSync supervises the socket itself; keep the library from tearing it
+                // down on its own when a channel closes or a token refresh blips.
+                reconnectDelay = 5.seconds
+                disconnectOnSessionLoss = false
+                disconnectOnNoSubscriptions = false
+            }
             install(Storage)
         }
         tasks = TaskRepository(AppDatabase.create(this).taskDao()) {
@@ -63,6 +73,20 @@ class LockListApp : Application() {
         ResetWorker.scheduleNext(this)
         appScope.launch {
             if (sync.isSignedIn()) sync.startRealtime()
+        }
+        watchNetwork()
+    }
+
+    private fun watchNetwork() {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        try {
+            cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    sync.onNetworkAvailable()
+                }
+            })
+        } catch (e: Exception) {
+            Log.w("LockList", "network callback unavailable", e)
         }
     }
 

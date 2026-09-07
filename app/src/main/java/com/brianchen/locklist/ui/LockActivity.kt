@@ -70,6 +70,10 @@ class LockActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val app = application as LockListApp
+        // The list renders from Room instantly; this pulls anything the portal changed
+        // while the socket was down, and makes sure the live loop is alive.
+        app.sync.startRealtime()
+        app.sync.requestQuickSync("screen on")
         setContent {
             val themeMode by app.settings.themeMode
             val wallpaperRevision by app.settings.wallpaperRevision

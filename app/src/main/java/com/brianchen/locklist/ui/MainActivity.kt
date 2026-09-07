@@ -100,9 +100,34 @@ class MainActivity : ComponentActivity() {
                 var updateStatus by remember { mutableStateOf("Version ${BuildConfig.VERSION_NAME}") }
                 var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
                 var updateBusy by remember { mutableStateOf(false) }
+                val liveStatus by app.sync.liveStatus.collectAsState()
+                val checkForUpdate: () -> Unit = {
+                    if (!updateBusy) {
+                        updateBusy = true
+                        updateStatus = "Checking…"
+                        scope.launch {
+                            try {
+                                val latest = updater.checkLatest()
+                                if (latest.isNewer) {
+                                    pendingUpdate = latest
+                                    updateStatus = "Update ${latest.versionName} available"
+                                } else {
+                                    pendingUpdate = null
+                                    updateStatus = "Up to date (${BuildConfig.VERSION_NAME})"
+                                }
+                            } catch (e: Exception) {
+                                pendingUpdate = null
+                                updateStatus = e.message ?: "Update check failed"
+                            } finally {
+                                updateBusy = false
+                            }
+                        }
+                    }
+                }
                 LaunchedEffect(Unit) {
                     signedIn = app.sync.isSignedIn()
                     email = app.sync.currentEmail()
+                    checkForUpdate()
                 }
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Column(
@@ -122,30 +147,7 @@ class MainActivity : ComponentActivity() {
                             updateStatus = updateStatus,
                             updateBusy = updateBusy,
                             canInstallUpdate = pendingUpdate != null,
-                            onCheckUpdate = {
-                                if (updateBusy) return@SetupScreen
-                                updateBusy = true
-                                updateStatus = "Checking…"
-                                scope.launch {
-                                    try {
-                                        val latest = updater.checkLatest()
-                                        if (latest.isNewer) {
-                                            pendingUpdate = latest
-                                            updateStatus =
-                                                "Update ${latest.versionName} available"
-                                        } else {
-                                            pendingUpdate = null
-                                            updateStatus =
-                                                "Up to date (${BuildConfig.VERSION_NAME})"
-                                        }
-                                    } catch (e: Exception) {
-                                        pendingUpdate = null
-                                        updateStatus = e.message ?: "Update check failed"
-                                    } finally {
-                                        updateBusy = false
-                                    }
-                                }
-                            },
+                            onCheckUpdate = checkForUpdate,
                             onInstallUpdate = {
                                 val latest = pendingUpdate ?: return@SetupScreen
                                 if (updateBusy) return@SetupScreen
@@ -199,6 +201,11 @@ class MainActivity : ComponentActivity() {
                                 "Signed in as ${email ?: "portal admin"}",
                                 style = MaterialTheme.typography.bodyMedium
                             )
+                            Text(
+                                liveStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             TextButton(
                                 onClick = {
                                     scope.launch {
@@ -226,6 +233,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshStatuses()
+        val app = application as LockListApp
+        app.sync.startRealtime()
+        app.sync.requestQuickSync("app opened")
+        // After a self-update HyperOS may refuse to auto-restart the service; opening the
+        // app is enough to bring the lock screen back once the permissions are in place.
+        if (overlayOk.value && notifyOk.value) startScreenService()
     }
 
     private fun refreshStatuses() {
