@@ -38,11 +38,24 @@ android {
         buildConfigField("String", "GITHUB_UPDATE_TOKEN", quoted("GITHUB_UPDATE_TOKEN"))
     }
 
+    signingConfigs {
+        // Same key for local adb installs and GitHub Release builds, so any APK from either
+        // source can replace the one on the phone. CI points LOCKLIST_KEYSTORE at the
+        // restored keystore; locally this falls back to the standard debug keystore.
+        create("locklist") {
+            val keystorePath = System.getenv("LOCKLIST_KEYSTORE")
+                ?: "${System.getProperty("user.home")}/.android/debug.keystore"
+            storeFile = file(keystorePath)
+            storePassword = System.getenv("LOCKLIST_KEYSTORE_PASSWORD") ?: "android"
+            keyAlias = System.getenv("LOCKLIST_KEY_ALIAS") ?: "androiddebugkey"
+            keyPassword = System.getenv("LOCKLIST_KEY_PASSWORD") ?: "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Same cert as current adb installs so GitHub APKs can replace the phone build.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("locklist")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

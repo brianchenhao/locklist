@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
 
+env:
+  # SHA-256 of the signing certificate already installed on the phone. A build signed with
+  # anything else could never be installed as an update, so fail loudly instead.
+  EXPECTED_SIGNER_SHA256: 2a615ee235b25e22a6f00344cedb20cc9d89f4f2ebb70e6b43ebcb8eff2f06ba
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -18,10 +23,10 @@ jobs:
           java-version: "17"
       - uses: android-actions/setup-android@v3
       - name: Restore signing key
-        # Same key the phone already trusts, so a GitHub APK can replace the installed build.
         run: |
-          mkdir -p ~/.android
-          echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
+          echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/locklist.keystore"
+          test -s "$RUNNER_TEMP/locklist.keystore" || { echo "keystore secret is empty"; exit 1; }
+          echo "LOCKLIST_KEYSTORE=$RUNNER_TEMP/locklist.keystore" >> "$GITHUB_ENV"
       - name: Write local.properties
         run: |
           {
@@ -33,6 +38,15 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease
+      - name: Verify signer matches the phone
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          ACTUAL=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk \
+            | sed -n 's/.*SHA-256 digest: //p' | head -n 1)
+          echo "signer: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED_SIGNER_SHA256" ]; then
+            echo "APK signer does not match the key installed on the phone"; exit 1
+          fi
       - name: Write latest.json
         run: |
           python3 - <<'PY'
