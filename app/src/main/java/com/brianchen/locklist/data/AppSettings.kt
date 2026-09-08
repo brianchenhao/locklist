@@ -10,10 +10,17 @@ class AppSettings(context: Context) {
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val themeMode: MutableState<String> = mutableStateOf(prefs.getString(KEY_THEME, THEME_SYSTEM)!!)
     val wallpaperRevision: MutableState<Long> = mutableStateOf(wallpaperFile().lastModified())
+    val viewMode: MutableState<ViewMode> =
+        mutableStateOf(ViewMode.fromName(prefs.getString(KEY_VIEW_MODE, null)))
 
     fun setThemeMode(mode: String) {
         prefs.edit().putString(KEY_THEME, mode).apply()
         themeMode.value = mode
+    }
+
+    fun setViewMode(mode: ViewMode) {
+        prefs.edit().putString(KEY_VIEW_MODE, mode.name).apply()
+        viewMode.value = mode
     }
 
     fun wallpaperFile(): File = File(appContext.filesDir, WALLPAPER_NAME)
@@ -28,6 +35,7 @@ class AppSettings(context: Context) {
         const val THEME_LIGHT = "light"
         private const val PREFS = "locklist_settings"
         private const val KEY_THEME = "theme"
+        private const val KEY_VIEW_MODE = "viewMode"
         private const val WALLPAPER_NAME = "wallpaper.jpg"
     }
 }

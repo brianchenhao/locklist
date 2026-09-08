@@ -2,6 +2,7 @@ package com.brianchen.locklist.sync
 
 import android.content.Context
 import android.util.Log
+import com.brianchen.locklist.data.TaskArea
 import com.brianchen.locklist.data.TaskRepository
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -245,6 +246,7 @@ class TaskSync(
                         notes = local.notes.ifBlank { null },
                         status = local.toStatus(),
                         sort = local.sortOrder,
+                        area = TaskArea.normalize(local.area),
                         completedAt = local.completedAtIso(),
                         createdAt = toIso(local.createdAt),
                         updatedAt = toIso(local.updatedAt),
@@ -258,6 +260,7 @@ class TaskSync(
                         notes = local.notes.ifBlank { null },
                         status = local.toStatus(),
                         sort = local.sortOrder,
+                        area = TaskArea.normalize(local.area),
                         completedAt = local.completedAtIso(),
                         updatedAt = toIso(local.updatedAt),
                         updatedBy = email

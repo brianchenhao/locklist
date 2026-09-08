@@ -15,7 +15,12 @@ class TaskRepository(
 
     suspend fun getById(id: String): Task? = dao.getById(id)
 
-    suspend fun add(title: String, status: String = TaskStatus.MORE, notes: String = "") {
+    suspend fun add(
+        title: String,
+        status: String = TaskStatus.MORE,
+        notes: String = "",
+        area: String = TaskArea.PERSONAL
+    ) {
         val next = TaskStatus.normalize(status)
         val now = System.currentTimeMillis()
         dao.upsert(
@@ -30,8 +35,16 @@ class TaskRepository(
                 recurring = false,
                 status = next,
                 notes = notes.trim(),
-                imagePaths = ""
+                imagePaths = "",
+                area = TaskArea.normalize(area)
             )
+        )
+        onChanged()
+    }
+
+    suspend fun setArea(task: Task, area: String) {
+        dao.upsert(
+            task.copy(area = TaskArea.normalize(area), updatedAt = System.currentTimeMillis())
         )
         onChanged()
     }
@@ -46,11 +59,17 @@ class TaskRepository(
         onChanged()
     }
 
-    suspend fun updateDetails(task: Task, title: String, notes: String) {
+    suspend fun updateDetails(
+        task: Task,
+        title: String,
+        notes: String,
+        area: String = task.area
+    ) {
         dao.upsert(
             task.copy(
                 title = title.trim(),
                 notes = notes.trim(),
+                area = TaskArea.normalize(area),
                 updatedAt = System.currentTimeMillis()
             )
         )

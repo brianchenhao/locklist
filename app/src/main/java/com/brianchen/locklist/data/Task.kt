@@ -15,7 +15,8 @@ data class Task(
     val recurring: Boolean = false,
     val status: String = TaskStatus.MORE,
     val notes: String = "",
-    val imagePaths: String = ""
+    val imagePaths: String = "",
+    val area: String = TaskArea.PERSONAL
 ) {
     val images: List<String>
         get() = TaskStatus.imageList(imagePaths)

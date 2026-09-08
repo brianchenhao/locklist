@@ -1,6 +1,7 @@
 package com.brianchen.locklist.sync
 
 import com.brianchen.locklist.data.Task
+import com.brianchen.locklist.data.TaskArea
 import com.brianchen.locklist.data.TaskStatus
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -22,6 +23,7 @@ data class PortalTask(
     val status: String,
     val sort: Int,
     val images: List<String>? = null,
+    val area: String? = null,
     @SerialName("completed_at") val completedAt: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String
@@ -38,7 +40,8 @@ data class PortalTask(
             deleted = false,
             status = stored,
             notes = notes.orEmpty(),
-            imagePaths = TaskStatus.imagePaths(images.orEmpty())
+            imagePaths = TaskStatus.imagePaths(images.orEmpty()),
+            area = TaskArea.normalize(area)
         )
     }
 }
@@ -52,6 +55,7 @@ data class PortalTaskInsert(
     val status: String,
     val sort: Int,
     val images: List<String> = emptyList(),
+    val area: String = TaskArea.PERSONAL,
     @SerialName("completed_at") val completedAt: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
@@ -64,6 +68,7 @@ data class PortalTaskPatch(
     val notes: String? = null,
     val status: String,
     val sort: Int,
+    val area: String = TaskArea.PERSONAL,
     @SerialName("completed_at") val completedAt: String?,
     @SerialName("updated_at") val updatedAt: String,
     @SerialName("updated_by") val updatedBy: String? = null

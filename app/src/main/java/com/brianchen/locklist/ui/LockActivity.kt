@@ -8,8 +8,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,14 +21,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
@@ -39,13 +34,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -53,12 +49,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.brianchen.locklist.LockListApp
 import com.brianchen.locklist.data.AppSettings
 import com.brianchen.locklist.data.Task
 import com.brianchen.locklist.data.TaskRepository
-import com.brianchen.locklist.data.TaskStatus
 import com.brianchen.locklist.sync.ThumbCache
 import com.brianchen.locklist.ui.theme.LockListTheme
 import kotlinx.coroutines.launch
@@ -107,15 +103,17 @@ private fun LockChecklistScreen(
     onOpenAfterUnlock: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val doneCount = tasks.count { it.done }
-    val total = tasks.size
+    val mode by settings.viewMode
+    val visible = remember(tasks, mode) { tasks.filter(mode::includes) }
+    val doneCount = visible.count { it.done }
+    val total = visible.size
     val progress = if (total == 0) 0f else doneCount / total.toFloat()
     var drag by remember { mutableFloatStateOf(0f) }
+    var showAdd by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val wallpaper = remember(wallpaperRevision) {
         loadWallpaperBitmap(settings, context.resources.displayMetrics.widthPixels)
     }
-    val pagerState = rememberPagerState { TaskStatus.COLUMNS.size }
 
     Box(
         modifier = Modifier
@@ -142,7 +140,7 @@ private fun LockChecklistScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 48.dp)
+                .padding(horizontal = 20.dp, vertical = 44.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -163,66 +161,113 @@ private fun LockChecklistScreen(
                     color = Color.White,
                     style = MaterialTheme.typography.headlineSmall
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(16.dp))
-                ScrollableTabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    containerColor = Color.Transparent,
-                    contentColor = Color.White,
-                    edgePadding = 0.dp,
-                    indicator = { positions ->
-                        if (pagerState.currentPage < positions.size) {
-                            TabRowDefaults.SecondaryIndicator(
-                                modifier = Modifier.tabIndicatorOffset(positions[pagerState.currentPage]),
-                                color = Color.White
+                Spacer(Modifier.height(12.dp))
+                ModeChips(
+                    current = mode,
+                    onSelect = { settings.setViewMode(it) },
+                    onDark = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            key(mode) {
+                val pages = remember(mode) { mode.pages() }
+                val pagerState = rememberPagerState { pages.size }
+                if (pages.size > 1) {
+                    ScrollableTabRow(
+                        selectedTabIndex = pagerState.currentPage,
+                        containerColor = Color.Transparent,
+                        contentColor = Color.White,
+                        edgePadding = 0.dp,
+                        indicator = { positions ->
+                            if (pagerState.currentPage < positions.size) {
+                                TabRowDefaults.SecondaryIndicator(
+                                    modifier = Modifier.tabIndicatorOffset(positions[pagerState.currentPage]),
+                                    color = Color.White
+                                )
+                            }
+                        },
+                        divider = {}
+                    ) {
+                        pages.indices.forEach { index ->
+                            Tab(
+                                selected = pagerState.currentPage == index,
+                                onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                                selectedContentColor = Color.White,
+                                unselectedContentColor = Color.White.copy(alpha = 0.6f),
+                                text = { Text(pageTitle(mode, index, tasks)) }
                             )
                         }
-                    },
-                    divider = {}
-                ) {
-                    TaskStatus.COLUMNS.forEachIndexed { index, status ->
-                        val count = tasks.count { TaskStatus.normalize(it.status) == status }
-                        Tab(
-                            selected = pagerState.currentPage == index,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                            selectedContentColor = Color.White,
-                            unselectedContentColor = Color.White.copy(alpha = 0.6f),
-                            text = { Text("${TaskStatus.label(status)} ($count)") }
-                        )
                     }
                 }
-            }
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = 12.dp)
-            ) { page ->
-                val status = TaskStatus.COLUMNS[page]
-                val columnTasks = tasks.filter { TaskStatus.normalize(it.status) == status }
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(columnTasks, key = { it.id }) { task ->
+                ModeBoard(
+                    mode = mode,
+                    tasks = tasks,
+                    pagerState = pagerState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(top = 8.dp),
+                    header = { cell, count ->
+                        Text(
+                            text = "${cell.title} · $count",
+                            color = Color.White.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    },
+                    row = { task, compact ->
                         LockTaskRow(
                             task = task,
                             thumbs = thumbs,
+                            compact = compact,
                             onToggle = { scope.launch { repo.setDone(task, !task.done) } },
                             onOpenAfterUnlock = onOpenAfterUnlock
                         )
+                    },
+                    empty = { compact ->
+                        Text(
+                            text = if (compact) "—" else "Nothing here",
+                            color = Color.White.copy(alpha = 0.4f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
                     }
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+            ) {
+                OutlinedButton(onClick = { showAdd = true }) {
+                    Text("+ Add", color = Color.White)
+                }
+                Button(onClick = onDismiss) {
+                    Text("Dismiss")
                 }
             }
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text("Dismiss")
-            }
         }
+    }
+
+    if (showAdd) {
+        AddTaskDialog(
+            defaultArea = mode.defaultArea(),
+            defaultStatus = mode.defaultStatus(),
+            showNotes = false,
+            onAdd = { title, notes, area, status ->
+                scope.launch { repo.add(title, status, notes, area) }
+                showAdd = false
+            },
+            onDismiss = { showAdd = false }
+        )
     }
 }
 
@@ -230,14 +275,10 @@ private fun LockChecklistScreen(
 private fun LockTaskRow(
     task: Task,
     thumbs: ThumbCache,
+    compact: Boolean,
     onToggle: () -> Unit,
     onOpenAfterUnlock: (String) -> Unit
 ) {
-    val scale by animateFloatAsState(
-        targetValue = if (task.done) 1.06f else 1f,
-        animationSpec = spring(),
-        label = "tickScale"
-    )
     val textColor by animateColorAsState(
         targetValue = if (task.done) Color.White.copy(alpha = 0.55f) else Color.White,
         label = "tickColor"
@@ -247,24 +288,27 @@ private fun LockTaskRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.Start
+            .padding(vertical = if (compact) 6.dp else 10.dp),
+        verticalAlignment = Alignment.Top
     ) {
-        Checkbox(
-            checked = task.done,
-            onCheckedChange = { onToggle() }
+        TickCircle(
+            done = task.done,
+            color = textColor,
+            onClick = onToggle,
+            size = if (compact) 20.dp else 24.dp,
+            modifier = Modifier.padding(top = 2.dp)
         )
-        Column(modifier = Modifier.padding(start = 8.dp, top = 10.dp)) {
+        Column(modifier = Modifier.padding(start = if (compact) 8.dp else 12.dp)) {
             Text(
                 text = task.title,
                 color = textColor,
-                style = MaterialTheme.typography.titleLarge,
+                style = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleLarge,
                 textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None,
+                maxLines = if (compact) 2 else Int.MAX_VALUE,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable(onClick = onToggle)
             )
-            if (note.isNotEmpty()) {
+            if (!compact && note.isNotEmpty()) {
                 TaskNoteText(
                     notes = note,
                     color = Color.White.copy(alpha = 0.7f),
@@ -274,7 +318,7 @@ private fun LockTaskRow(
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
-            if (task.images.isNotEmpty()) {
+            if (!compact && task.images.isNotEmpty()) {
                 TaskThumbs(
                     paths = task.images,
                     thumbs = thumbs,
