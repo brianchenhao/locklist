@@ -221,7 +221,6 @@ class MainActivity : ComponentActivity() {
                             EditorScreen(
                                 repo = app.tasks,
                                 tasks = tasks,
-                                settings = app.settings,
                                 modifier = Modifier.weight(1f)
                             )
                         }

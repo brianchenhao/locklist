@@ -1,5 +1,9 @@
 package com.brianchen.locklist.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,21 +16,19 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,117 +37,106 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.brianchen.locklist.LockListApp
-import com.brianchen.locklist.data.AppSettings
 import com.brianchen.locklist.data.Task
-import com.brianchen.locklist.data.TaskArea
 import com.brianchen.locklist.data.TaskRepository
 import com.brianchen.locklist.data.TaskStatus
 import com.brianchen.locklist.sync.ThumbCache
 import kotlinx.coroutines.launch
 
 @Composable
-fun EditorScreen(
-    repo: TaskRepository,
-    tasks: List<Task>,
-    settings: AppSettings,
-    modifier: Modifier = Modifier
-) {
+fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val app = LocalContext.current.applicationContext as LockListApp
     val uriHandler = LocalUriHandler.current
-    val mode by settings.viewMode
+    val pagerState = rememberPagerState { TaskStatus.COLUMNS.size }
+    val expanded = remember { mutableStateMapOf<String, Boolean>() }
     var showAdd by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Task?>(null) }
     var editTitle by remember { mutableStateOf("") }
     var editNotes by remember { mutableStateOf("") }
-    var editArea by remember { mutableStateOf(TaskArea.PERSONAL) }
+    var attachTarget by remember { mutableStateOf<Task?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        val task = attachTarget
+        attachTarget = null
+        if (uri == null || task == null) return@rememberLauncherForActivityResult
+        status = "Uploading photo…"
+        scope.launch {
+            try {
+                val path = app.images.attach(task, uri)
+                repo.addImage(task, path)
+                expanded[task.id] = true
+                status = null
+            } catch (e: Exception) {
+                status = "Upload failed: ${e.message ?: "unknown error"}"
+            }
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            ModeChips(
-                current = mode,
-                onSelect = { settings.setViewMode(it) },
-                onDark = false,
-                modifier = Modifier.fillMaxWidth()
-            )
-            key(mode) {
-                val pages = remember(mode) { mode.pages() }
-                val pagerState = rememberPagerState { pages.size }
-                if (pages.size > 1) {
-                    ScrollableTabRow(
-                        selectedTabIndex = pagerState.currentPage,
-                        edgePadding = 0.dp
-                    ) {
-                        pages.indices.forEach { index ->
-                            Tab(
-                                selected = pagerState.currentPage == index,
-                                onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                                text = { Text(pageTitle(mode, index, tasks)) }
-                            )
-                        }
-                    }
+            KanbanTabs(pagerState = pagerState, tasks = tasks, onDark = false)
+            val message = status
+            if (message != null) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            KanbanPager(
+                tasks = tasks,
+                pagerState = pagerState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(top = 8.dp),
+                empty = {
+                    Text(
+                        text = "Nothing here yet. Tap + to add.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
                 }
-                ModeBoard(
-                    mode = mode,
-                    tasks = tasks,
-                    pagerState = pagerState,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(top = 8.dp),
-                    header = { cell, count ->
-                        Text(
-                            text = "${cell.title} · $count",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
+            ) { task ->
+                EditorTaskCard(
+                    task = task,
+                    thumbs = app.thumbs,
+                    expanded = expanded[task.id] == true,
+                    onToggleExpanded = { expanded[task.id] = expanded[task.id] != true },
+                    onToggleDone = { scope.launch { repo.setDone(task, !task.done) } },
+                    onEdit = {
+                        editing = task
+                        editTitle = task.title
+                        editNotes = task.notes
                     },
-                    row = { task, compact ->
-                        EditorTaskRow(
-                            task = task,
-                            compact = compact,
-                            thumbs = app.thumbs,
-                            onToggle = { scope.launch { repo.setDone(task, !task.done) } },
-                            onEdit = {
-                                editing = task
-                                editTitle = task.title
-                                editNotes = task.notes
-                                editArea = TaskArea.normalize(task.area)
-                            },
-                            onMove = { next -> scope.launch { repo.setStatus(task, next) } },
-                            onFlipArea = {
-                                val next = if (TaskArea.normalize(task.area) == TaskArea.WORK) {
-                                    TaskArea.PERSONAL
-                                } else {
-                                    TaskArea.WORK
-                                }
-                                scope.launch { repo.setArea(task, next) }
-                            },
-                            onMoveUp = { scope.launch { repo.moveUp(task) } },
-                            onMoveDown = { scope.launch { repo.moveDown(task) } },
-                            onDelete = { scope.launch { repo.delete(task) } },
-                            onOpenUrl = { url -> uriHandler.openUri(url) },
-                            onOpenImage = { path ->
-                                scope.launch {
-                                    val url = app.thumbs.signedUrl(path) ?: return@launch
-                                    uriHandler.openUri(url)
-                                }
-                            }
-                        )
+                    onAttach = {
+                        attachTarget = task
+                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     },
-                    empty = { compact ->
-                        Text(
-                            text = if (compact) "—" else "Nothing here yet. Tap + to add.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                    onRemoveImage = { path ->
+                        scope.launch {
+                            repo.removeImage(task, path)
+                            app.images.remove(path)
+                        }
+                    },
+                    onMove = { next -> scope.launch { repo.setStatus(task, next) } },
+                    onMoveUp = { scope.launch { repo.moveUp(task) } },
+                    onMoveDown = { scope.launch { repo.moveDown(task) } },
+                    onDelete = { scope.launch { repo.delete(task) } },
+                    onOpenUrl = { url -> uriHandler.openUri(url) },
+                    onOpenImage = { path ->
+                        scope.launch {
+                            val url = app.thumbs.signedUrl(path) ?: return@launch
+                            uriHandler.openUri(url)
+                        }
                     }
                 )
             }
@@ -162,11 +153,10 @@ fun EditorScreen(
 
     if (showAdd) {
         AddTaskDialog(
-            defaultArea = mode.defaultArea(),
-            defaultStatus = mode.defaultStatus(),
+            defaultStatus = TaskStatus.COLUMNS[pagerState.currentPage],
             showNotes = true,
-            onAdd = { title, notes, area, status ->
-                scope.launch { repo.add(title, status, notes, area) }
+            onAdd = { title, notes, taskStatus ->
+                scope.launch { repo.add(title, taskStatus, notes) }
                 showAdd = false
             },
             onDismiss = { showAdd = false }
@@ -191,18 +181,9 @@ fun EditorScreen(
                         value = editNotes,
                         onValueChange = { editNotes = it },
                         modifier = Modifier.fillMaxWidth(),
-                        minLines = 3,
-                        label = { Text("Notes") }
+                        minLines = 4,
+                        label = { Text("Description") }
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TaskArea.ALL.forEach { option ->
-                            FilterChip(
-                                selected = editArea == option,
-                                onClick = { editArea = option },
-                                label = { Text(TaskArea.label(option)) }
-                            )
-                        }
-                    }
                     TextButton(
                         onClick = {
                             scope.launch { repo.setRecurring(target, !target.recurring) }
@@ -218,7 +199,7 @@ fun EditorScreen(
                     onClick = {
                         val title = editTitle.trim()
                         if (title.isNotEmpty()) {
-                            scope.launch { repo.updateDetails(target, title, editNotes, editArea) }
+                            scope.launch { repo.updateDetails(target, title, editNotes) }
                         }
                         editing = null
                     }
@@ -234,111 +215,124 @@ fun EditorScreen(
 }
 
 @Composable
-private fun EditorTaskRow(
+private fun EditorTaskCard(
     task: Task,
-    compact: Boolean,
     thumbs: ThumbCache,
-    onToggle: () -> Unit,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onToggleDone: () -> Unit,
     onEdit: () -> Unit,
+    onAttach: () -> Unit,
+    onRemoveImage: (String) -> Unit,
     onMove: (String) -> Unit,
-    onFlipArea: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onDelete: () -> Unit,
     onOpenUrl: (String) -> Unit,
     onOpenImage: (String) -> Unit
 ) {
-    var menu by remember { mutableStateOf(false) }
-    Row(
+    var moveMenu by remember { mutableStateOf(false) }
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = if (compact) 0.dp else 4.dp),
-        verticalAlignment = Alignment.Top
+            .padding(vertical = 4.dp)
     ) {
-        Checkbox(checked = task.done, onCheckedChange = { onToggle() })
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(top = if (compact) 12.dp else 10.dp, end = 4.dp)
-        ) {
-            Text(
-                text = task.title,
-                style = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleMedium,
-                maxLines = if (compact) 2 else Int.MAX_VALUE,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onEdit)
-            )
-            if (!compact && task.notes.isNotBlank()) {
-                TaskNoteText(
-                    notes = task.notes,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    linkColor = MaterialTheme.colorScheme.primary,
-                    onUrl = onOpenUrl,
-                    modifier = Modifier.padding(top = 2.dp)
+        Column(modifier = Modifier.padding(end = 8.dp, bottom = if (expanded) 8.dp else 0.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(checked = task.done, onCheckedChange = { onToggleDone() })
+                Text(
+                    text = task.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None,
+                    maxLines = if (expanded) Int.MAX_VALUE else 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(onClick = onToggleExpanded)
+                        .padding(vertical = 12.dp)
+                )
+                ExpandChevron(
+                    expanded = expanded,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .clickable(onClick = onToggleExpanded)
                 )
             }
-            if (!compact && task.images.isNotEmpty()) {
-                TaskThumbs(
-                    paths = task.images,
-                    thumbs = thumbs,
-                    onOpen = onOpenImage,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-        }
-        TextButton(onClick = { menu = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
-            Text("⋯")
-        }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            TaskStatus.COLUMNS.filter { it != TaskStatus.normalize(task.status) }.forEach { next ->
-                DropdownMenuItem(
-                    text = { Text("Move to ${TaskStatus.label(next)}") },
-                    onClick = {
-                        menu = false
-                        onMove(next)
+            if (expanded) {
+                Column(modifier = Modifier.padding(start = 16.dp)) {
+                    if (task.notes.isNotBlank()) {
+                        TaskNoteText(
+                            notes = task.notes,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            linkColor = MaterialTheme.colorScheme.primary,
+                            onUrl = onOpenUrl
+                        )
+                    } else {
+                        Text(
+                            text = "No description",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                )
+                    if (task.images.isNotEmpty()) {
+                        TaskThumbs(
+                            paths = task.images,
+                            thumbs = thumbs,
+                            onOpen = onOpenImage,
+                            size = 96.dp,
+                            onRemove = onRemoveImage,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = onEdit) { Text("Edit") }
+                        TextButton(onClick = onAttach) { Text("Photo") }
+                        Box {
+                            TextButton(onClick = { moveMenu = true }) { Text("Move") }
+                            DropdownMenu(expanded = moveMenu, onDismissRequest = { moveMenu = false }) {
+                                TaskStatus.COLUMNS
+                                    .filter { it != TaskStatus.normalize(task.status) }
+                                    .forEach { next ->
+                                        DropdownMenuItem(
+                                            text = { Text("To ${TaskStatus.label(next)}") },
+                                            onClick = {
+                                                moveMenu = false
+                                                onMove(next)
+                                            }
+                                        )
+                                    }
+                                DropdownMenuItem(
+                                    text = { Text("Up") },
+                                    onClick = {
+                                        moveMenu = false
+                                        onMoveUp()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Down") },
+                                    onClick = {
+                                        moveMenu = false
+                                        onMoveDown()
+                                    }
+                                )
+                            }
+                        }
+                        TextButton(onClick = onDelete) {
+                            Text("Delete", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
             }
-            DropdownMenuItem(
-                text = {
-                    val other = if (TaskArea.normalize(task.area) == TaskArea.WORK) "Personal" else "Work"
-                    Text("Mark as $other")
-                },
-                onClick = {
-                    menu = false
-                    onFlipArea()
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Edit") },
-                onClick = {
-                    menu = false
-                    onEdit()
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Up") },
-                onClick = {
-                    menu = false
-                    onMoveUp()
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Down") },
-                onClick = {
-                    menu = false
-                    onMoveDown()
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Delete") },
-                onClick = {
-                    menu = false
-                    onDelete()
-                }
-            )
         }
     }
 }

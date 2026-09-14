@@ -68,6 +68,7 @@ data class PortalTaskPatch(
     val notes: String? = null,
     val status: String,
     val sort: Int,
+    val images: List<String> = emptyList(),
     val area: String = TaskArea.PERSONAL,
     @SerialName("completed_at") val completedAt: String?,
     @SerialName("updated_at") val updatedAt: String,

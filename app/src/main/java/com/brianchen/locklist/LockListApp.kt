@@ -11,6 +11,7 @@ import com.brianchen.locklist.data.AppSettings
 import com.brianchen.locklist.data.TaskRepository
 import com.brianchen.locklist.sync.ResetWorker
 import com.brianchen.locklist.sync.SyncWorker
+import com.brianchen.locklist.sync.TaskImages
 import com.brianchen.locklist.sync.TaskSync
 import com.brianchen.locklist.sync.ThumbCache
 import io.github.jan.supabase.SupabaseClient
@@ -38,6 +39,8 @@ class LockListApp : Application() {
         private set
     lateinit var thumbs: ThumbCache
         private set
+    lateinit var images: TaskImages
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -61,6 +64,7 @@ class LockListApp : Application() {
             SyncWorker.enqueueOneShot(this)
         }
         thumbs = ThumbCache(this, supabase)
+        images = TaskImages(this, supabase, thumbs)
         sync = TaskSync(this, tasks, supabase, appScope)
         val channel = NotificationChannel(
             CHANNEL_ID,

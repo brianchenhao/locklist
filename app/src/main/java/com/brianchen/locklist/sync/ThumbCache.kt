@@ -44,6 +44,20 @@ class ThumbCache(
         sampled
     }
 
+    /** Store a thumb for an image the phone just uploaded, so it shows without a download. */
+    fun seed(path: String, jpeg: ByteArray) {
+        val sampled = decodeSampled(jpeg, TARGET_PX) ?: return
+        cacheFile(path).outputStream().use { out ->
+            sampled.compress(Bitmap.CompressFormat.JPEG, 70, out)
+        }
+        memory.put(path, sampled)
+    }
+
+    fun evict(path: String) {
+        memory.remove(path)
+        cacheFile(path).delete()
+    }
+
     suspend fun signedUrl(path: String): String? = withContext(Dispatchers.IO) {
         try {
             supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_TTL_SECONDS.seconds)

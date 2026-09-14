@@ -49,6 +49,28 @@ class TaskRepository(
         onChanged()
     }
 
+    suspend fun addImage(task: Task, path: String) {
+        val current = dao.getById(task.id) ?: task
+        dao.upsert(
+            current.copy(
+                imagePaths = TaskStatus.imagePaths(current.images + path),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        onChanged()
+    }
+
+    suspend fun removeImage(task: Task, path: String) {
+        val current = dao.getById(task.id) ?: task
+        dao.upsert(
+            current.copy(
+                imagePaths = TaskStatus.imagePaths(current.images - path),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        onChanged()
+    }
+
     suspend fun rename(task: Task, title: String) {
         dao.upsert(task.copy(title = title.trim(), updatedAt = System.currentTimeMillis()))
         onChanged()
