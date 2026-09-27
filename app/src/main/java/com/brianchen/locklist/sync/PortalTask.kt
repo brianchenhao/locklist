@@ -28,7 +28,8 @@ data class PortalTask(
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String
 ) {
-    fun toLocal(): Task {
+    /** A clean local copy of this server row, as confirmed at [syncedAt] (phone time). */
+    fun toLocal(syncedAt: Long): Task {
         val stored = TaskStatus.normalize(status)
         return Task(
             id = id,
@@ -41,7 +42,13 @@ data class PortalTask(
             status = stored,
             notes = notes.orEmpty(),
             imagePaths = TaskStatus.imagePaths(images.orEmpty()),
-            area = TaskArea.normalize(area)
+            area = TaskArea.normalize(area),
+            dirty = false,
+            syncedAt = syncedAt,
+            remoteCompletedAt = completedAt,
+            remoteUpdatedAt = updatedAt,
+            remoteBase = SyncPlan.Content.of(this).encode(),
+            pendingSent = null
         )
     }
 }
@@ -77,12 +84,22 @@ data class PortalTaskPatch(
 
 fun Task.toStatus(): String = TaskStatus.normalize(status)
 
-fun Task.completedAtIso(): String? = if (done) toIso(updatedAt) else null
-
 fun parseIso(value: String): Long {
     return OffsetDateTime.parse(value).toInstant().toEpochMilli()
 }
 
 fun toIso(millis: Long): String {
     return Instant.ofEpochMilli(millis).toString()
+}
+
+/**
+ * Server timestamp rewritten as UTC with a 'Z' and full precision, for use as a filter value.
+ * Avoids a '+00:00' offset in the query string, where a stray '+' could read as a space.
+ */
+fun canonicalIso(value: String): String {
+    return try {
+        OffsetDateTime.parse(value).toInstant().toString()
+    } catch (_: Exception) {
+        value
+    }
 }

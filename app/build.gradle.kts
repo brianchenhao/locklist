@@ -16,8 +16,8 @@ android {
         applicationId = "com.brianchen.locklist"
         minSdk = 29
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.5.0"
+        versionCode = 8
+        versionName = "0.6.0"
         val localProperties = Properties().apply {
             val file = rootProject.file("local.properties")
             if (file.exists()) load(file.inputStream())
@@ -98,4 +98,5 @@ dependencies {
     implementation(libs.supabase.storage)
     implementation(libs.ktor.client.okhttp)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    testImplementation(libs.junit)
 }

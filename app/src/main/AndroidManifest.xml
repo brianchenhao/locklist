@@ -41,7 +41,7 @@
             android:exported="false"
             android:launchMode="singleInstance"
             android:showWhenLocked="true"
-            android:theme="@style/Theme.LockList"
+            android:theme="@style/Theme.LockList.Lock"
             android:turnScreenOn="true" />
         <activity
             android:name=".ui.OpenLinkActivity"

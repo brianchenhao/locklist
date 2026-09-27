@@ -4,10 +4,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,10 +22,15 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +39,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +53,7 @@ import com.brianchen.locklist.data.Task
 import com.brianchen.locklist.data.TaskRepository
 import com.brianchen.locklist.data.TaskStatus
 import com.brianchen.locklist.sync.ThumbCache
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
@@ -54,20 +63,36 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
     val uriHandler = LocalUriHandler.current
     val pagerState = rememberPagerState { TaskStatus.COLUMNS.size }
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
+    val snackbar = remember { SnackbarHostState() }
     var showAdd by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<Task?>(null) }
-    var editTitle by remember { mutableStateOf("") }
-    var editNotes by remember { mutableStateOf("") }
-    var attachTarget by remember { mutableStateOf<Task?>(null) }
+    // Ids and text survive rotation and dark-mode switches; the task itself is looked up live.
+    var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editTitle by rememberSaveable { mutableStateOf("") }
+    var editNotes by rememberSaveable { mutableStateOf("") }
+    var editRecurring by rememberSaveable { mutableStateOf(false) }
+    // What the fields showed when the dialog opened. Save sends only what the user changed
+    // from these, so a web edit that lands while the dialog is open is never written back over.
+    var openedTitle by rememberSaveable { mutableStateOf("") }
+    var openedNotes by rememberSaveable { mutableStateOf("") }
+    var openedRecurring by rememberSaveable { mutableStateOf(false) }
+    var attachTargetId by rememberSaveable { mutableStateOf<String?>(null) }
+    var removingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var removingPath by rememberSaveable { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        val task = attachTarget
-        attachTarget = null
-        if (uri == null || task == null) return@rememberLauncherForActivityResult
+        val taskId = attachTargetId
+        attachTargetId = null
+        if (uri == null || taskId == null) return@rememberLauncherForActivityResult
         status = "Uploading photo…"
         scope.launch {
             try {
+                // Read from Room, not the composed list: right after a recreate it can still be empty.
+                val task = repo.observeTasks().first().firstOrNull { it.id == taskId }
+                if (task == null) {
+                    status = "That task is gone, photo not added"
+                    return@launch
+                }
                 val path = app.images.attach(task, uri)
                 repo.addImage(task, path)
                 expanded[task.id] = true
@@ -77,6 +102,11 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
             }
         }
     }
+
+    val fabLift by animateDpAsState(
+        targetValue = if (snackbar.currentSnackbarData != null) 64.dp else 0.dp,
+        label = "fabLift"
+    )
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -97,6 +127,8 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(top = 8.dp),
+                // Room under the last card so the FAB never covers its chevron or buttons.
+                contentPadding = PaddingValues(bottom = 88.dp),
                 empty = {
                     Text(
                         text = "Nothing here yet. Tap + to add.",
@@ -113,24 +145,39 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
                     onToggleExpanded = { expanded[task.id] = expanded[task.id] != true },
                     onToggleDone = { scope.launch { repo.setDone(task, !task.done) } },
                     onEdit = {
-                        editing = task
+                        editingId = task.id
                         editTitle = task.title
                         editNotes = task.notes
+                        editRecurring = task.recurring
+                        openedTitle = task.title
+                        openedNotes = task.notes
+                        openedRecurring = task.recurring
                     },
                     onAttach = {
-                        attachTarget = task
+                        attachTargetId = task.id
                         picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     },
                     onRemoveImage = { path ->
-                        scope.launch {
-                            repo.removeImage(task, path)
-                            app.images.remove(path)
-                        }
+                        removingId = task.id
+                        removingPath = path
                     },
                     onMove = { next -> scope.launch { repo.setStatus(task, next) } },
                     onMoveUp = { scope.launch { repo.moveUp(task) } },
                     onMoveDown = { scope.launch { repo.moveDown(task) } },
-                    onDelete = { scope.launch { repo.delete(task) } },
+                    onDelete = {
+                        val snapshot = task
+                        snackbar.currentSnackbarData?.dismiss()
+                        scope.launch {
+                            // One coroutine, so an Undo can never run before the delete it undoes.
+                            repo.delete(snapshot)
+                            val result = snackbar.showSnackbar(
+                                message = "Task deleted",
+                                actionLabel = "Undo",
+                                duration = SnackbarDuration.Short
+                            )
+                            if (result == SnackbarResult.ActionPerformed) repo.undo(snapshot)
+                        }
+                    },
                     onOpenUrl = { url -> uriHandler.openUri(url) },
                     onOpenImage = { path ->
                         scope.launch {
@@ -141,11 +188,18 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
                 )
             }
         }
+        SnackbarHost(
+            hostState = snackbar,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(8.dp)
+        )
         FloatingActionButton(
             onClick = { showAdd = true },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
+                .padding(bottom = fabLift)
         ) {
             Icon(Icons.Default.Add, contentDescription = "New task")
         }
@@ -163,10 +217,10 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
         )
     }
 
-    val target = editing
+    val target = editingId?.let { id -> tasks.firstOrNull { it.id == id } }
     if (target != null) {
         AlertDialog(
-            onDismissRequest = { editing = null },
+            onDismissRequest = { editingId = null },
             title = { Text("Edit task") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -184,31 +238,79 @@ fun EditorScreen(repo: TaskRepository, tasks: List<Task>, modifier: Modifier = M
                         minLines = 4,
                         label = { Text("Description") }
                     )
-                    TextButton(
-                        onClick = {
-                            scope.launch { repo.setRecurring(target, !target.recurring) }
-                            editing = target.copy(recurring = !target.recurring)
-                        }
-                    ) {
-                        Text(if (target.recurring) "Daily on" else "Daily")
-                    }
+                    // Applied only on Save; Cancel leaves the task as it was.
+                    FilterChip(
+                        selected = editRecurring,
+                        onClick = { editRecurring = !editRecurring },
+                        label = { Text("Daily") }
+                    )
                 }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val title = editTitle.trim()
-                        if (title.isNotEmpty()) {
-                            scope.launch { repo.updateDetails(target, title, editNotes) }
+                        val titleEdited = editTitle.trim() != openedTitle.trim()
+                        val notesEdited = editNotes.trim() != openedNotes.trim()
+                        val recurringEdited = editRecurring != openedRecurring
+                        // A field the user left alone passes the live value, which the
+                        // repository reads as "not edited".
+                        val title = if (titleEdited) editTitle.trim() else target.title
+                        val notes = if (notesEdited) editNotes.trim() else target.notes
+                        val recurring = if (recurringEdited) editRecurring else target.recurring
+                        val changed = titleEdited || notesEdited || recurringEdited
+                        if (title.isNotBlank() && changed) {
+                            scope.launch {
+                                repo.updateDetails(
+                                    task = target,
+                                    title = title,
+                                    notes = notes,
+                                    area = target.area,
+                                    recurring = recurring
+                                )
+                            }
                         }
-                        editing = null
+                        editingId = null
                     }
                 ) {
                     Text("Save")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { editing = null }) { Text("Cancel") }
+                TextButton(onClick = { editingId = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    val removeId = removingId
+    val removePath = removingPath
+    if (removeId != null && removePath != null) {
+        val closeRemove = {
+            removingId = null
+            removingPath = null
+        }
+        AlertDialog(
+            onDismissRequest = closeRemove,
+            title = { Text("Remove photo?") },
+            text = { Text("It is removed from this task on the web too.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        closeRemove()
+                        val task = tasks.firstOrNull { it.id == removeId }
+                        if (task != null) {
+                            scope.launch {
+                                repo.removeImage(task, removePath)
+                                // The storage file is deleted only after the row change reaches the server.
+                                app.images.removeLater(task.id, removePath)
+                            }
+                        }
+                    }
+                ) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = closeRemove) { Text("Cancel") }
             }
         )
     }

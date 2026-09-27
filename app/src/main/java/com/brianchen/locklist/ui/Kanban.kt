@@ -1,20 +1,22 @@
 package com.brianchen.locklist.ui
 
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,9 +27,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
@@ -45,14 +49,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.brianchen.locklist.data.Task
 import com.brianchen.locklist.data.TaskStatus
 import kotlinx.coroutines.launch
 
-/** Tabs for the four columns, with live counts. Pass onDark for the lock screen. */
+/**
+ * Tabs for the four columns, with live counts. Pass onDark for the lock screen: there the
+ * row is fixed (not scrollable) so all four columns fit, with the count above each label.
+ */
 @Composable
 fun KanbanTabs(
     pagerState: PagerState,
@@ -61,37 +72,76 @@ fun KanbanTabs(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    val fg = if (onDark) Color.White else Color.Unspecified
-    ScrollableTabRow(
-        selectedTabIndex = pagerState.currentPage,
-        modifier = modifier,
-        containerColor = Color.Transparent,
-        contentColor = fg,
-        edgePadding = 0.dp,
-        indicator = { positions ->
-            if (pagerState.currentPage < positions.size) {
-                TabRowDefaults.SecondaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(positions[pagerState.currentPage]),
-                    color = fg
-                )
-            }
-        },
-        divider = {}
-    ) {
-        TaskStatus.COLUMNS.forEachIndexed { index, status ->
-            val count = tasks.count { TaskStatus.normalize(it.status) == status }
-            if (onDark) {
+    val current = pagerState.currentPage
+    if (onDark) {
+        TabRow(
+            selectedTabIndex = current,
+            modifier = modifier,
+            containerColor = Color.Transparent,
+            contentColor = Color.White,
+            indicator = { positions ->
+                if (current < positions.size) {
+                    TabRowDefaults.SecondaryIndicator(
+                        modifier = Modifier.tabIndicatorOffset(positions[current]),
+                        color = Color.White
+                    )
+                }
+            },
+            divider = {}
+        ) {
+            TaskStatus.COLUMNS.forEachIndexed { index, status ->
+                val count = tasks.count { TaskStatus.normalize(it.status) == status }
                 Tab(
-                    selected = pagerState.currentPage == index,
+                    selected = current == index,
                     onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
                     selectedContentColor = Color.White,
-                    unselectedContentColor = Color.White.copy(alpha = 0.6f),
-                    text = { Text("${TaskStatus.label(status)} ($count)") }
-                )
-            } else {
+                    unselectedContentColor = Color.White.copy(alpha = 0.6f)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = count.toString(),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = TaskStatus.label(status),
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    } else {
+        val selectedColor = MaterialTheme.colorScheme.primary
+        val unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+        ScrollableTabRow(
+            selectedTabIndex = current,
+            modifier = modifier,
+            containerColor = Color.Transparent,
+            contentColor = selectedColor,
+            edgePadding = 0.dp,
+            indicator = { positions ->
+                if (current < positions.size) {
+                    TabRowDefaults.SecondaryIndicator(
+                        modifier = Modifier.tabIndicatorOffset(positions[current]),
+                        color = selectedColor
+                    )
+                }
+            },
+            divider = {}
+        ) {
+            TaskStatus.COLUMNS.forEachIndexed { index, status ->
+                val count = tasks.count { TaskStatus.normalize(it.status) == status }
                 Tab(
-                    selected = pagerState.currentPage == index,
+                    selected = current == index,
                     onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                    selectedContentColor = selectedColor,
+                    unselectedContentColor = unselectedColor,
                     text = { Text("${TaskStatus.label(status)} ($count)") }
                 )
             }
@@ -105,6 +155,7 @@ fun KanbanPager(
     tasks: List<Task>,
     pagerState: PagerState,
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
     empty: @Composable () -> Unit,
     row: @Composable (Task) -> Unit
 ) {
@@ -114,14 +165,14 @@ fun KanbanPager(
         if (items.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize()) { empty() }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = contentPadding) {
                 items(items, key = { it.id }) { task -> row(task) }
             }
         }
     }
 }
 
-/** Thin ring that fills with a check when done. */
+/** Thin ring that fills with a check when done. Announced as a checkbox. */
 @Composable
 fun TickCircle(
     done: Boolean,
@@ -135,13 +186,18 @@ fun TickCircle(
             .size(size)
             .clip(CircleShape)
             .border(2.dp, color, CircleShape)
-            .clickable(onClick = onClick),
+            .toggleable(
+                value = done,
+                role = Role.Checkbox,
+                onValueChange = { onClick() }
+            )
+            .semantics { contentDescription = "Done" },
         contentAlignment = Alignment.Center
     ) {
         if (done) {
             Icon(
                 imageVector = Icons.Default.Check,
-                contentDescription = "Done",
+                contentDescription = null,
                 tint = color,
                 modifier = Modifier.size(size * 0.7f)
             )

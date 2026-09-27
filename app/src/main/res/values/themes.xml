@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.LockList" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Lock screen: dark from the very first frame, painted with the same gradient Compose
+         draws, so a screen-on never flashes a light window. -->
+    <style name="Theme.LockList.Lock" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/bg_lock</item>
+    </style>
 </resources>

@@ -7,6 +7,7 @@ import android.util.LruCache
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.storage.storage
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import kotlin.time.Duration.Companion.seconds
@@ -31,11 +32,7 @@ class ThumbCache(
             }
         }
         val url = signedUrl(path) ?: return@withContext null
-        val bytes = try {
-            URL(url).openStream().use { it.readBytes() }
-        } catch (_: Exception) {
-            return@withContext null
-        }
+        val bytes = download(url) ?: return@withContext null
         val sampled = decodeSampled(bytes, TARGET_PX) ?: return@withContext null
         file.outputStream().use { out ->
             sampled.compress(Bitmap.CompressFormat.JPEG, 70, out)
@@ -66,6 +63,26 @@ class ThumbCache(
         }
     }
 
+    // URL.openStream has no timeout on Android; a dead connection would hang the thumb forever.
+    private fun download(url: String): ByteArray? {
+        val connection = try {
+            URL(url).openConnection() as HttpURLConnection
+        } catch (_: Exception) {
+            return null
+        }
+        return try {
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.instanceFollowRedirects = true
+            if (connection.responseCode !in 200..299) return null
+            connection.inputStream.use { it.readBytes() }
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun cacheFile(path: String): File {
         val digest = MessageDigest.getInstance("SHA-256").digest(path.toByteArray())
         val name = digest.joinToString("") { byte -> "%02x".format(byte) }
@@ -89,5 +106,7 @@ class ThumbCache(
         private const val BUCKET = "task-images"
         private const val TARGET_PX = 128
         private const val SIGNED_TTL_SECONDS = 3600
+        private const val CONNECT_TIMEOUT_MS = 10_000
+        private const val READ_TIMEOUT_MS = 20_000
     }
 }
