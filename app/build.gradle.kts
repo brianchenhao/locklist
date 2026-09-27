@@ -16,8 +16,8 @@ android {
         applicationId = "com.brianchen.locklist"
         minSdk = 29
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.6.0"
+        versionCode = 9
+        versionName = "0.6.1"
         val localProperties = Properties().apply {
             val file = rootProject.file("local.properties")
             if (file.exists()) load(file.inputStream())
